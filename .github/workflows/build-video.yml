@@ -26,6 +26,21 @@ jobs:
           if (-not $script) { throw "build.ps1 not found in ZIP" }
           "SCRIPT_DIR=$($script.DirectoryName)" >> $env:GITHUB_ENV
 
+
+      - name: Fix timeline outro
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $timeline = Get-ChildItem "./project" -Filter "timeline.py" -Recurse | Select-Object -First 1
+          if (-not $timeline) { throw "timeline.py not found" }
+          $source = [System.IO.File]::ReadAllText($timeline.FullName)
+          $old = 'all_scenes = list(SCENES) + [dict(id="outro", title="", kicker="", source=CREDITS)]'
+          $new = 'all_scenes = list(SCENES) + [dict(id="outro", title="", kicker="", source=CREDITS, sentences=[OUTRO_LINE])]'
+          if (-not $source.Contains($old)) { throw "Expected timeline line not found" }
+          $source = $source.Replace($old, $new)
+          [System.IO.File]::WriteAllText($timeline.FullName, $source, [System.Text.UTF8Encoding]::new($false))
+          Write-Host "Timeline outro patched."
+          
       - name: Build MP4 video
         shell: pwsh
         run: |
