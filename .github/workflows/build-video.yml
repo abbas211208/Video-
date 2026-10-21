@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -17,28 +17,87 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install FFmpeg and Python Libraries
         run: |
-          python -m pip install --upgrade pip
-          pip install pillow numpy imageio-ffmpeg
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg unzip fonts-dejavu-core
+          pip install --upgrade pip
+          pip install pillow numpy imageio-ffmpeg edge-tts
 
-      - name: Build Video Step-by-Step
-        shell: cmd
+      - name: Auto-Find Files, Fix Code & Render Video
         run: |
-          REM Jodi file-gulo india-population-doc folder-er bhetore thake, tahole sekhane dhukbe
-          if exist india-population-doc cd india-population-doc
+          python3 - << 'EOF'
+          import os, glob, zipfile, subprocess, sys, json, asyncio
 
-          python make_script.py SCRIPT.md
-          python build_audio.py voices.json work
-          powershell -NoProfile -ExecutionPolicy Bypass -File synth.ps1 -InFile work/tts_request.json -OutDir work/wav
+          # 1. Jodi .zip file upload kora thake, seta automatic unzip korbe
+          for z in glob.glob("**/*.zip", recursive=True):
+              print(f"Extracting {z}...")
+              with zipfile.ZipFile(z, 'r') as zf:
+                  zf.extractall(".")
 
-          REM Auto-fix for KeyError: 'sentences' in timeline.py / content.py
-          python -c "import pathlib; p=pathlib.Path('timeline.py'); t=p.read_text(encoding='utf-8'); p.write_text(t.replace('sc[\"sentences\"]', 'sc.get(\"sentences\", sc.get(\"lines\", sc.get(\"items\", [sc.get(\"text\", \"\")])))'), encoding='utf-8')"
+          # 2. make_script.py kothay ache seta khuje ber kore sei folder-e dhukbe
+          matches = glob.glob("**/make_script.py", recursive=True)
+          if not matches:
+              print("ERROR: Project-er file-gulo GitHub-e upload kora hoyni!")
+              print("Current files in repo:", os.listdir("."))
+              sys.exit(1)
 
-          python timeline.py work work/timeline.json work/narration.wav
-          python music.py work/narration.wav work/music.wav
-          python render.py work/timeline.json work/frames
-          python assemble.py work work/timeline.json work/narration.wav Population-Rising-India.mp4
+          proj_dir = os.path.dirname(os.path.abspath(matches[0]))
+          os.chdir(proj_dir)
+          print("Working inside directory:", proj_dir)
+
+          # 3. Step 1 & 2: Script ebong TTS Request toiri kora
+          subprocess.run([sys.executable, "make_script.py", "SCRIPT.md"], check=True)
+          subprocess.run([sys.executable, "build_audio.py", "voices.json", "work"], check=True)
+
+          # 4. Step 3: Audio Synthesis (Edge-TTS diye 100% guaranteed voice)
+          import edge_tts
+          os.makedirs("work/wav", exist_ok=True)
+          with open("work/tts_request.json", encoding="utf-8") as f:
+              req = json.load(f)
+
+          async def make_audio():
+              manifest = []
+              for s in req["sentences"]:
+                  sid = str(s["id"])
+                  text = str(s["text"])
+                  mp3 = f"work/wav/{sid}.mp3"
+                  wav = f"work/wav/{sid}.wav"
+                  comm = edge_tts.Communicate(text, "en-US-ChristopherNeural")
+                  await comm.save(mp3)
+                  subprocess.run([
+                      "ffmpeg", "-y", "-i", mp3,
+                      "-acodec", "pcm_s16le", "-ac", "1", "-ar", "22050", wav
+                  ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+                  os.remove(mp3)
+                  manifest.append({"id": s["id"], "file": wav})
+                  print(f"Synthesized: {sid}", flush=True)
+              with open("work/wav/manifest.json", "w", encoding="utf-8") as mf:
+                  json.dump(manifest, mf, indent=2)
+
+          asyncio.run(make_audio())
+
+          # 5. Fix KeyError: 'sentences' in timeline.py
+          with open("timeline.py", "r", encoding="utf-8") as f:
+              t_code = f.read()
+          t_code_fixed = t_code.replace(
+              'sc["sentences"]',
+              'sc.get("sentences", sc.get("lines", sc.get("narration", sc.get("text", sc.get("cues", [])))))'
+          )
+          with open("timeline.py", "w", encoding="utf-8") as f:
+              f.write(t_code_fixed)
+
+          # 6. Run Timeline, Music, Render, Assemble
+          r = subprocess.run([sys.executable, "timeline.py", "work", "work/timeline.json", "work/narration.wav"])
+          if r.returncode != 0:
+              import content
+              print("DEBUG SCENES[0] KEYS:", content.SCENES[0].keys() if isinstance(content.SCENES[0], dict) else type(content.SCENES[0]))
+              sys.exit(1)
+
+          subprocess.run([sys.executable, "music.py", "work/narration.wav", "work/music.wav"], check=True)
+          subprocess.run([sys.executable, "render.py", "work/timeline.json", "work/frames"], check=True)
+          subprocess.run([sys.executable, "assemble.py", "work", "work/timeline.json", "work/narration.wav", "Population-Rising-India.mp4"], check=True)
+          EOF
 
       - name: Upload Finished Video
         uses: actions/upload-artifact@v4
@@ -46,4 +105,5 @@ jobs:
           name: Final-Documentary-Video
           path: |
             **/Population-Rising-India.mp4
+            **/Population-Rising-India.avi
             **/work/subtitles.srt
