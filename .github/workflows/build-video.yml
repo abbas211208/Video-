@@ -1,45 +1,43 @@
+
 name: Build India Population Video
 
 on:
-workflow_dispatch:
+  workflow_dispatch:
 
 jobs:
-build-video:
-runs-on: windows-latest
-timeout-minutes: 360
+  build-video:
+    runs-on: windows-latest
+    timeout-minutes: 360
 
-steps:
-  - name: Download project files
-    uses: actions/checkout@v4
+    steps:
+      - name: Download project files
+        uses: actions/checkout@v4
 
-  - name: Extract project ZIP
-    shell: pwsh
-    run: |
-      Expand-Archive -Path "./india-population-doc.zip" -DestinationPath "./project" -Force
-      Get-ChildItem "./project"
+      - name: Extract project ZIP
+        shell: pwsh
+        run: |
+          Expand-Archive -LiteralPath "./india-population-doc.zip" -DestinationPath "./project" -Force
 
-  - name: Install Python
-    uses: actions/setup-python@v5
-    with:
-      python-version: "3.11"
+      - name: Locate build script
+        id: locate
+        shell: pwsh
+        run: |
+          $script = Get-ChildItem "./project" -Filter "build.ps1" -Recurse | Select-Object -First 1
+          if (-not $script) { throw "build.ps1 not found in ZIP" }
+          "SCRIPT_DIR=$($script.DirectoryName)" >> $env:GITHUB_ENV
 
-  - name: Build MP4 video
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
-      Set-Location "./project/india-population-doc"
-      & .\build.ps1
-      if ($LASTEXITCODE -ne 0) {
-        throw "Video build failed."
-      }
-      if (-not (Test-Path "./Population-Rising-India.mp4")) {
-        throw "MP4 file was not created."
-      }
+      - name: Build MP4 video
+        shell: pwsh
+        run: |
+          Set-Location $env:SCRIPT_DIR
+          & ".\build.ps1"
+          if ($LASTEXITCODE -ne 0) { throw "Video build failed" }
 
-  - name: Upload finished video
-    uses: actions/upload-artifact@v4
-    with:
-      name: India-Population-Finished-Video
-      path: project/india-population-doc/Population-Rising-India.mp4
-      if-no-files-found: error
-      retention-days: 7
+      - name: Upload video files
+        uses: actions/upload-artifact@v4
+        with:
+          name: India-Population-Video
+          path: |
+            project/**/*.mp4
+          if-no-files-found: error
+          retention-days: 7
