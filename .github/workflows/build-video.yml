@@ -1,69 +1,49 @@
-
-name: Build India Population Video
+name: Build Documentary Video
 
 on:
+  push:
   workflow_dispatch:
 
 jobs:
-  build-video:
+  build:
     runs-on: windows-latest
-    timeout-minutes: 360
 
     steps:
-      - name: Download project files
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract project ZIP
-        shell: pwsh
-        run: |
-          Expand-Archive -LiteralPath "./india-population-doc.zip" -DestinationPath "./project" -Force
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-      - name: Locate build script
-        id: locate
-        shell: pwsh
+      - name: Install dependencies
         run: |
-          $script = Get-ChildItem "./project" -Filter "build.ps1" -Recurse | Select-Object -First 1
-          if (-not $script) { throw "build.ps1 not found in ZIP" }
-          "SCRIPT_DIR=$($script.DirectoryName)" >> $env:GITHUB_ENV
+          python -m pip install --upgrade pip
+          pip install pillow numpy imageio-ffmpeg
 
+      - name: Build Video Step-by-Step
+        shell: cmd
+        run: |
+          REM Jodi file-gulo india-population-doc folder-er bhetore thake, tahole sekhane dhukbe
+          if exist india-population-doc cd india-population-doc
 
-      - name: Fix timeline outro
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $timeline = Get-ChildItem "./project" -Filter "timeline.py" -Recurse | Select-Object -First 1
-          if (-not $timeline) { throw "timeline.py not found" }
-          $source = [System.IO.File]::ReadAllText($timeline.FullName)
-          $old = 'all_scenes = list(SCENES) + [dict(id="outro", title="", kicker="", source=CREDITS)]'
-          $new = 'all_scenes = list(SCENES) + [dict(id="outro", title="", kicker="", source=CREDITS, sentences=[OUTRO_LINE])]'
-          if (-not $source.Contains($old)) { throw "Expected timeline line not found" }
-          $source = $source.Replace($old, $new)
-          [System.IO.File]::WriteAllText($timeline.FullName, $source, [System.Text.UTF8Encoding]::new($false))
-          Write-Host "Timeline outro patched."
-          
-      - name: Debug narration audio files
-        shell: pwsh
-        run: |
-          Write-Host "Searching project for WAV files..."
-          Get-ChildItem "./project" -Filter "*.wav" -Recurse -ErrorAction SilentlyContinue |
-            Select-Object -ExpandProperty FullName
-          Write-Host "Searching for narration files..."
-          Get-ChildItem "./project" -Filter "*narration*" -Recurse -ErrorAction SilentlyContinue |
-            Select-Object -ExpandProperty FullName
-            
-          
-      - name: Build MP4 video
-        shell: pwsh
-        run: |
-          Set-Location $env:SCRIPT_DIR
-          & ".\build.ps1"
-          if ($LASTEXITCODE -ne 0) { throw "Video build failed" }
+          python make_script.py SCRIPT.md
+          python build_audio.py voices.json work
+          powershell -NoProfile -ExecutionPolicy Bypass -File synth.ps1 -InFile work/tts_request.json -OutDir work/wav
 
-      - name: Upload video files
+          REM Auto-fix for KeyError: 'sentences' in timeline.py / content.py
+          python -c "import pathlib; p=pathlib.Path('timeline.py'); t=p.read_text(encoding='utf-8'); p.write_text(t.replace('sc[\"sentences\"]', 'sc.get(\"sentences\", sc.get(\"lines\", sc.get(\"items\", [sc.get(\"text\", \"\")])))'), encoding='utf-8')"
+
+          python timeline.py work work/timeline.json work/narration.wav
+          python music.py work/narration.wav work/music.wav
+          python render.py work/timeline.json work/frames
+          python assemble.py work work/timeline.json work/narration.wav Population-Rising-India.mp4
+
+      - name: Upload Finished Video
         uses: actions/upload-artifact@v4
         with:
-          name: India-Population-Video
+          name: Final-Documentary-Video
           path: |
-            project/**/*.mp4
-          if-no-files-found: error
-          retention-days: 7
+            **/Population-Rising-India.mp4
+            **/work/subtitles.srt
