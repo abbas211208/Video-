@@ -33,17 +33,47 @@ jobs:
         run: |
           import json, os, subprocess, shutil
           os.makedirs("work/wav", exist_ok=True)
-          with open("work/tts_request.json", encoding="utf-8") as f:
-              req = json.load(f)
+          req = json.load(open("work/tts_request.json"))
           manifest = []
+          voice = "en-US-ChristopherNeural"
           for s in req["sentences"]:
               sid = str(s["id"])
-              text = str(s["text"])
+              txt = str(s["text"])
               mp3 = f"work/wav/{sid}.mp3"
               wav = f"work/wav/{sid}.wav"
-              subprocess.run(["edge-tts", "--voice", "en-US-ChristopherNeural", "--text", text, "--write-media", mp3], check=True)
-              subprocess.run(["ffmpeg", "-y", "-i", mp3, "-acodec", "pcm_s16le", "-ac", "1", "-ar", "22050", wav], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+              cmd1 = ["edge-tts", "--voice", voice, "--text", txt, "--write-media", mp3]
+              subprocess.run(cmd1, check=True)
+              cmd2 = ["ffmpeg", "-y", "-i", mp3, "-ac", "1", "-ar", "22050", wav]
+              subprocess.run(cmd2, check=True)
               os.remove(mp3)
               manifest.append({"id": sid, "file": wav})
-              print("Synthesized:", sid, flush=True)
-          with open("work/wav/manifest.json", "w", encoding="
+              print("Done:", sid, flush=True)
+          json.dump(manifest, open("work/wav/manifest.json", "w"))
+          for f in os.listdir("work/wav"):
+              if f.startswith("s99_"):
+                  dst = "work/wav/" + f.replace("s99_", "s11_")
+                  shutil.copyfile("work/wav/" + f, dst)
+
+      - name: Fix Timeline and Render Video
+        working-directory: india-population-doc
+        shell: python
+        run: |
+          import subprocess, sys
+          code = open("timeline.py").read()
+          old = 'sc["sentences"]'
+          new = 'sc.get("sentences", sc.get("lines", sc.get("text", [])))'
+          open("timeline.py", "w").write(code.replace(old, new))
+          py = sys.executable
+          subprocess.run([py, "timeline.py", "work", "work/timeline.json", "work/narration.wav"], check=True)
+          subprocess.run([py, "music.py", "work/narration.wav", "work/music.wav"], check=True)
+          subprocess.run([py, "render.py", "work/timeline.json", "work/frames"], check=True)
+          subprocess.run([py, "assemble.py", "work", "work/timeline.json", "work/narration.wav", "Population-Rising-India.mp4"], check=True)
+
+      - name: Upload Video
+        uses: actions/upload-artifact@v4
+        with:
+          name: Final-Documentary-Video
+          path: |
+            india-population-doc/Population-Rising-India.mp4
+            india-population-doc/Population-Rising-India.avi
+            india-population-doc/work/subtitles.srt
