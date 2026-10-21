@@ -27,30 +27,25 @@ jobs:
       - name: Auto-Find Files, Fix Code & Render Video
         run: |
           python3 - << 'EOF'
-          import os, glob, zipfile, subprocess, sys, json, asyncio
+          import os, glob, zipfile, subprocess, sys, json, asyncio, shutil
 
-          # 1. Jodi .zip file upload kora thake, seta automatic unzip korbe
+          # 1. Extract zip if present
           for z in glob.glob("**/*.zip", recursive=True):
               print(f"Extracting {z}...")
               with zipfile.ZipFile(z, 'r') as zf:
                   zf.extractall(".")
 
-          # 2. make_script.py kothay ache seta khuje ber kore sei folder-e dhukbe
+          # 2. Enter project folder
           matches = glob.glob("**/make_script.py", recursive=True)
-          if not matches:
-              print("ERROR: Project-er file-gulo GitHub-e upload kora hoyni!")
-              print("Current files in repo:", os.listdir("."))
-              sys.exit(1)
-
           proj_dir = os.path.dirname(os.path.abspath(matches[0]))
           os.chdir(proj_dir)
           print("Working inside directory:", proj_dir)
 
-          # 3. Step 1 & 2: Script ebong TTS Request toiri kora
+          # 3. Generate script and TTS request
           subprocess.run([sys.executable, "make_script.py", "SCRIPT.md"], check=True)
           subprocess.run([sys.executable, "build_audio.py", "voices.json", "work"], check=True)
 
-          # 4. Step 3: Audio Synthesis (Edge-TTS diye 100% guaranteed voice)
+          # 4. Synthesize Audio via Edge-TTS
           import edge_tts
           os.makedirs("work/wav", exist_ok=True)
           with open("work/tts_request.json", encoding="utf-8") as f:
@@ -77,33 +72,23 @@ jobs:
 
           asyncio.run(make_audio())
 
-          # 5. Fix KeyError: 'sentences' in timeline.py
-          with open("timeline.py", "r", encoding="utf-8") as f:
-              t_code = f.read()
-          t_code_fixed = t_code.replace(
-              'sc["sentences"]',
-              'sc.get("sentences", sc.get("lines", sc.get("narration", sc.get("text", sc.get("cues", [])))))'
-          )
-          with open("timeline.py", "w", encoding="utf-8") as f:
-              f.write(t_code_fixed)
+          # 5. FIX: Scene ID vs Index mismatch (e.g. s99_00.wav -> s11_00.wav)
+          import content
+          for idx, sc in enumerate(content.SCENES):
+              sc_id = sc.get("id", f"s{idx:02d}")
+              idx_prefix = f"s{idx:02d}"
+              if sc_id != idx_prefix:
+                  for wav_file in glob.glob(f"work/wav/{sc_id}_*.wav"):
+                      new_name = wav_file.replace(f"{sc_id}_", f"{idx_prefix}_")
+                      shutil.copyfile(wav_file, new_name)
+                      print(f"Mapped {wav_file} -> {new_name}")
 
           # 6. Run Timeline, Music, Render, Assemble
-          r = subprocess.run([sys.executable, "timeline.py", "work", "work/timeline.json", "work/narration.wav"])
-          if r.returncode != 0:
-              import content
-              print("DEBUG SCENES[0] KEYS:", content.SCENES[0].keys() if isinstance(content.SCENES[0], dict) else type(content.SCENES[0]))
-              sys.exit(1)
-
+          subprocess.run([sys.executable, "timeline.py", "work", "work/timeline.json", "work/narration.wav"], check=True)
           subprocess.run([sys.executable, "music.py", "work/narration.wav", "work/music.wav"], check=True)
           subprocess.run([sys.executable, "render.py", "work/timeline.json", "work/frames"], check=True)
           subprocess.run([sys.executable, "assemble.py", "work", "work/timeline.json", "work/narration.wav", "Population-Rising-India.mp4"], check=True)
           EOF
 
       - name: Upload Finished Video
-        uses: actions/upload-artifact@v4
-        with:
-          name: Final-Documentary-Video
-          path: |
-            **/Population-Rising-India.mp4
-            **/Population-Rising-India.avi
-            **/work/subtitles.srt
+        uses: actions/upload-artifact
