@@ -41,6 +41,17 @@ jobs:
           [System.IO.File]::WriteAllText($timeline.FullName, $source, [System.Text.UTF8Encoding]::new($false))
           Write-Host "Timeline outro patched."
           
+      - name: Debug narration audio files
+        shell: pwsh
+        run: |
+          Write-Host "Searching project for WAV files..."
+          Get-ChildItem "./project" -Filter "*.wav" -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty FullName
+          Write-Host "Searching for narration files..."
+          Get-ChildItem "./project" -Filter "*narration*" -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty FullName
+            
+          
       - name: Build MP4 video
         shell: pwsh
         run: |
