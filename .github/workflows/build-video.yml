@@ -20,23 +20,30 @@ jobs:
           sudo apt-get install -y ffmpeg unzip fonts-dejavu-core
           pip install pillow numpy imageio-ffmpeg edge-tts
 
-      - name: Extract and Build Video
+      - name: Extract and Prepare Audio
         run: |
-          unzip -o india-population-doc.zip || true
-          cd india-population-doc || true
-          python make_script.py SCRIPT.md[span_0](start_span)[span_0](end_span)[span_1](start_span)[span_1](end_span)
-          python build_audio.py voices.json work[span_2](start_span)[span_2](end_span)[span_3](start_span)[span_3](end_span)[span_4](start_span)[span_4](end_span)
-          python -c "import json, os, subprocess, asyncio, edge_tts; os.makedirs('work/wav', exist_ok=True); req=json.load(open('work/tts_request.json')); asyncio.run((lambda: [None for s in req['sentences'] if (asyncio.get_event_loop().run_until_complete(edge_tts.Communicate(str(s['text']), 'en-US-ChristopherNeural').save(f'work/wav/{s[\"id\"]}.mp3')), subprocess.run(['ffmpeg','-y','-i',f'work/wav/{s[\"id\"]}.mp3','-acodec','pcm_s16le','-ac','1','-ar','22050',f'work/wav/{s[\"id\"]}.wav'], check=True), print('Done:', s['id']))])())"
-          cp work/wav/s99_00.wav work/wav/s11_00.wav || true[span_5](start_span)[span_5](end_span)
-          python timeline.py work work/timeline.json work/narration.wav[span_6](start_span)[span_6](end_span)[span_7](start_span)[span_7](end_span)[span_8](start_span)[span_8](end_span)
-          python music.py work/narration.wav work/music.wav[span_9](start_span)[span_9](end_span)[span_10](start_span)[span_10](end_span)[span_11](start_span)[span_11](end_span)
-          python render.py work/timeline.json work/frames[span_12](start_span)[span_12](end_span)[span_13](start_span)[span_13](end_span)[span_14](start_span)[span_14](end_span)
-          python assemble.py work work/timeline.json work/narration.wav Population-Rising-India.mp4[span_15](start_span)[span_15](end_span)[span_16](start_span)[span_16](end_span)[span_17](start_span)[span_17](end_span)
+          unzip -o india-population-doc.zip
+          cd india-population-doc
+          python make_script.py SCRIPT.md
+          python build_audio.py voices.json work
 
-      - name: Upload Video
-        uses: actions/upload-artifact@v4
-        with:
-          name: Final-Documentary-Video
-          path: |
-            **/Population-Rising-India.mp4[span_18](start_span)[span_18](end_span)[span_19](start_span)[span_19](end_span)[span_20](start_span)[span_20](end_span)
-            **/Population-Rising-India.avi[span_21](start_span)[span_21](end_span)[span_22](start_span)[span_22](end_span)
+      - name: Generate Voice Narration
+        working-directory: india-population-doc
+        shell: python
+        run: |
+          import json, os, subprocess, shutil
+          os.makedirs("work/wav", exist_ok=True)
+          with open("work/tts_request.json", encoding="utf-8") as f:
+              req = json.load(f)
+          manifest = []
+          for s in req["sentences"]:
+              sid = str(s["id"])
+              text = str(s["text"])
+              mp3 = f"work/wav/{sid}.mp3"
+              wav = f"work/wav/{sid}.wav"
+              subprocess.run(["edge-tts", "--voice", "en-US-ChristopherNeural", "--text", text, "--write-media", mp3], check=True)
+              subprocess.run(["ffmpeg", "-y", "-i", mp3, "-acodec", "pcm_s16le", "-ac", "1", "-ar", "22050", wav], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+              os.remove(mp3)
+              manifest.append({"id": sid, "file": wav})
+              print("Synthesized:", sid, flush=True)
+          with open("work/wav/manifest.json", "w", encoding="
