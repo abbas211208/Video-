@@ -58,7 +58,7 @@ jobs:
         working-directory: india-population-doc
         shell: python
         run: |
-          import subprocess, sys
+          import subprocess, sys, content
           tcode = open("timeline.py").read()
           old_t = 'sc["sentences"]'
           new_t = 'sc.get("sentences", sc.get("lines", sc.get("text", [])))'
@@ -66,7 +66,10 @@ jobs:
           rcode = open("render.py").read()
           bad_r = "base.split()[i].point(lambda v, cb=ov.split()[i]: min(255, v + cb))"
           fix_r = "__import__('PIL.ImageChops').ImageChops.add(base, ov).split()[i]"
-          open("render.py", "w").write(rcode.replace(bad_r, fix_r))
+          rcode = rcode.replace(bad_r, fix_r)
+          hdr = "from content import *\n"
+          hdr += "if 'TFR' not in globals(): TFR = getattr(content, 'TFR_SERIES', getattr(content, 'FERTILITY', [(1951,5.9),(1971,5.2),(1991,3.6),(2011,2.4),(2024,2.0)]))\n"
+          open("render.py", "w").write(hdr + rcode)
           py = sys.executable
           subprocess.run([py, "timeline.py", "work", "work/timeline.json", "work/narration.wav"], check=True)
           subprocess.run([py, "music.py", "work/narration.wav", "work/music.wav"], check=True)
